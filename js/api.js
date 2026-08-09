@@ -5,6 +5,58 @@
  */
 var StockAPI = (function() {
 
+    // ===== 内存缓存层 =====
+    var cache = {};
+    var pending = {}; // 去重：同一个请求进行中时复用
+
+    function getCache(key) {
+        var entry = cache[key];
+        if (!entry) return null;
+        if (Date.now() - entry.time > entry.ttl) {
+            delete cache[key];
+            return null;
+        }
+        return entry.data;
+    }
+
+    function setCache(key, data, ttl) {
+        cache[key] = { data: data, time: Date.now(), ttl: ttl };
+        // 定期清理过期缓存
+        if (Object.keys(cache).length > 50) {
+            var now = Date.now();
+            Object.keys(cache).forEach(function(k) {
+                if (now - cache[k].time > cache[k].ttl) delete cache[k];
+            });
+        }
+    }
+
+    // 带缓存的JSONP请求
+    function cachedJsonp(url, cacheKey, ttl, callback) {
+        // 检查缓存
+        var cached = getCache(cacheKey);
+        if (cached) {
+            // 异步返回，保持回调语义一致
+            setTimeout(function() { callback(null, cached); }, 0);
+            return;
+        }
+
+        // 去重：同一请求正在进行中
+        if (pending[cacheKey]) {
+            pending[cacheKey].push(callback);
+            return;
+        }
+        pending[cacheKey] = [callback];
+
+        jsonp(url, function(err, data) {
+            if (!err && data) {
+                setCache(cacheKey, data, ttl);
+            }
+            var cbs = pending[cacheKey];
+            delete pending[cacheKey];
+            cbs.forEach(function(cb) { cb(err, data); });
+        });
+    }
+
     // JSONP请求
     function jsonp(url, callback) {
         var cbName = 'jsonp_cb_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now();
@@ -50,12 +102,13 @@ var StockAPI = (function() {
 
     // 搜索股票
     function searchStock(keyword, callback) {
+        var cacheKey = 'search_' + keyword.toLowerCase();
         var url = 'https://searchapi.eastmoney.com/api/suggest/get' +
             '?input=' + encodeURIComponent(keyword) +
             '&type=14' +
             '&token=D43BF722C8E33BDC906FB84D85E326E8' +
             '&count=10';
-        jsonp(url, function(err, data) {
+        cachedJsonp(url, cacheKey, 30000, function(err, data) {
             if (err) return callback(err);
             var results = [];
             if (data && data.QuotationCodeTable && data.QuotationCodeTable.Data) {
@@ -72,13 +125,13 @@ var StockAPI = (function() {
         });
     }
 
-    // 获取实时行情
+    // 获取实时行情（3秒缓存）
     function getQuote(secid, callback) {
         var fields = 'f43,f44,f45,f46,f47,f48,f50,f57,f58,f60,f80,f84,f85,f86,f92,f105,f108,f116,f117,f152,f161,f168,f169,f170,f171,f292';
         var url = 'https://push2.eastmoney.com/api/qt/stock/get' +
             '?secid=' + secid +
             '&fields=' + fields;
-        jsonp(url, function(err, data) {
+        cachedJsonp(url, 'quote_' + secid, 3000, function(err, data) {
             if (err) return callback(err);
             if (!data || !data.data) return callback(new Error('无数据'));
             var d = data.data;
@@ -104,9 +157,7 @@ var StockAPI = (function() {
         });
     }
 
-    // 获取K线数据
-    // klt: 101=日K 102=周K 103=月K 60=60分 30=30分
-    // fqt: 0=不复权 1=前复权 2=后复权
+    // 获取K线数据（5分钟缓存，历史数据不常变）
     function getKline(secid, klt, fqt, limit, callback) {
         klt = klt || 101;
         fqt = fqt !== undefined ? fqt : 1;
@@ -121,7 +172,8 @@ var StockAPI = (function() {
             '&fields1=f1,f2,f3,f4,f5,f6' +
             '&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61';
 
-        jsonp(url, function(err, data) {
+        var cacheKey = 'kline_' + secid + '_' + klt + '_' + limit;
+        cachedJsonp(url, cacheKey, 300000, function(err, data) {
             if (err) return callback(err);
             if (!data || !data.data || !data.data.klines) return callback(new Error('无K线数据'));
 
@@ -150,9 +202,8 @@ var StockAPI = (function() {
         });
     }
 
-    // 获取大盘指数列表
+    // 获取大盘指数列表（3秒缓存）
     function getIndices(callback) {
-        // 上证指数、深证成指、创业板指、科创50、沪深300
         var secids = '1.000001,0.399001,0.399006,1.000688,1.000300';
         var fields = 'f2,f3,f4,f12,f14';
         var url = 'https://push2.eastmoney.com/api/qt/ulist.np/get' +
@@ -160,7 +211,7 @@ var StockAPI = (function() {
             '&fields=' + fields +
             '&fltt=2';
 
-        jsonp(url, function(err, data) {
+        cachedJsonp(url, 'indices', 3000, function(err, data) {
             if (err) return callback(err);
             var results = [];
             if (data && data.data && data.data.diff) {
@@ -182,7 +233,7 @@ var StockAPI = (function() {
     // sortField: f3=涨跌幅 f8=换手率
     // sortType: 0=降序 1=升序
     function getRankList(type, callback) {
-        type = type || 'gainers'; // gainers | losers
+        type = type || 'gainers';
         var sortParams = type === 'gainers'
             ? { sortField: 'f3', sortType: 0 }
             : { sortField: 'f3', sortType: 1 };
@@ -195,7 +246,7 @@ var StockAPI = (function() {
             '&fid=' + sortParams.sortField +
             '&po=' + (sortParams.sortType === 0 ? 1 : 0);
 
-        jsonp(url, function(err, data) {
+        cachedJsonp(url, 'rank_' + type, 10000, function(err, data) {
             if (err) return callback(err);
             var results = [];
             if (data && data.data && data.data.diff) {
@@ -217,7 +268,7 @@ var StockAPI = (function() {
         });
     }
 
-    // 批量获取多只股票实时行情
+    // 批量获取多只股票实时行情（3秒缓存）
     function getBatchQuotes(secids, callback) {
         var fields = 'f2,f3,f4,f12,f14,f15,f16,f17,f6';
         var url = 'https://push2.eastmoney.com/api/qt/ulist.np/get' +
@@ -225,7 +276,8 @@ var StockAPI = (function() {
             '&fields=' + fields +
             '&fltt=2';
 
-        jsonp(url, function(err, data) {
+        var cacheKey = 'batch_' + secids.sort().join(',');
+        cachedJsonp(url, cacheKey, 3000, function(err, data) {
             if (err) return callback(err);
             var results = [];
             if (data && data.data && data.data.diff) {
