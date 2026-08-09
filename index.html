@@ -12,7 +12,43 @@
     <link rel="apple-touch-icon" href="icons/icon-192.png">
     <title>量化炒股Pro</title>
     <link rel="stylesheet" href="css/style.css">
-    <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+    <!-- ECharts 国内CDN加载，失败时回退到备用CDN -->
+    <script>
+    (function(){
+        var CDNS = [
+            'https://cdn.bootcdn.net/ajax/libs/echarts/5.5.0/echarts.min.js',
+            'https://lib.baomitu.com/echarts/5.5.0/echarts.min.js',
+            'https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js'
+        ];
+        var loadIdx = 0;
+        window.__echartsReady = false;
+        window.__echartsCallbacks = [];
+        window.__onEchartsReady = function(cb) {
+            if (window.__echartsReady && window.echarts) { cb(); return; }
+            window.__echartsCallbacks.push(cb);
+        };
+        function tryLoad() {
+            if (loadIdx >= CDNS.length) {
+                console.warn('ECharts 所有CDN加载失败，图表功能不可用');
+                return;
+            }
+            var s = document.createElement('script');
+            s.src = CDNS[loadIdx];
+            s.onload = function() {
+                window.__echartsReady = true;
+                var cbs = window.__echartsCallbacks;
+                window.__echartsCallbacks = [];
+                cbs.forEach(function(f) { try { f(); } catch(e) { console.error(e); } });
+            };
+            s.onerror = function() {
+                loadIdx++;
+                tryLoad();
+            };
+            document.head.appendChild(s);
+        }
+        tryLoad();
+    })();
+    </script>
 </head>
 <body>
     <div id="app">
@@ -311,11 +347,11 @@
                 </div>
                 <div class="form-group">
                     <label>价格（元）</label>
-                    <input type="number" id="trade-price" step="0.01" min="0.01">
+                    <input type="number" id="trade-price" step="0.01" min="0.01" oninput="App.updateTradePreview()">
                 </div>
                 <div class="form-group">
                     <label>数量（股）</label>
-                    <input type="number" id="trade-quantity" step="100" min="100" value="100">
+                    <input type="number" id="trade-quantity" step="100" min="100" value="100" oninput="App.updateTradePreview()">
                 </div>
                 <div class="quick-qty">
                     <button onclick="App.setQty(100)">100</button>
