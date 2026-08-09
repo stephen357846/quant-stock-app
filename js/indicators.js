@@ -120,49 +120,37 @@ var Indicators = (function() {
         return { dif: dif, dea: dea, macd: macd };
     }
 
-    // RSI相对强弱指标
+    // RSI相对强弱指标 (Wilder's smoothing)
     function RSI(klines, period) {
         period = period || 14;
         var result = [];
-        var gains = [];
-        var losses = [];
+        var avgGain = 0;
+        var avgLoss = 0;
 
         for (var i = 0; i < klines.length; i++) {
             if (i === 0) {
-                gains.push(0);
-                losses.push(0);
                 result.push(null);
+                continue;
+            }
+            var change = klines[i].close - klines[i - 1].close;
+            var gain = change > 0 ? change : 0;
+            var loss = change < 0 ? -change : 0;
+
+            if (i < period) {
+                // 累积初始平均值
+                avgGain += gain;
+                avgLoss += loss;
+                result.push(null);
+            } else if (i === period) {
+                // 第一个RSI使用简单平均
+                avgGain = (avgGain + gain) / period;
+                avgLoss = (avgLoss + loss) / period;
+                result.push(avgLoss === 0 ? 100 : (100 - (100 / (1 + avgGain / avgLoss))));
             } else {
-                var change = klines[i].close - klines[i - 1].close;
-                gains.push(change > 0 ? change : 0);
-                losses.push(change < 0 ? -change : 0);
-
-                if (i < period) {
-                    result.push(null);
-                } else {
-                    var avgGain, avgLoss;
-                    if (i === period) {
-                        var sumGain = 0, sumLoss = 0;
-                        for (var j = 1; j <= period; j++) {
-                            sumGain += gains[j];
-                            sumLoss += losses[j];
-                        }
-                        avgGain = sumGain / period;
-                        avgLoss = sumLoss / period;
-                    } else {
-                        // 平滑
-                        avgGain = (result[i - 1] !== null) ?
-                            ((gains.slice(i - period + 1, i + 1).reduce(function(a, b) { return a + b; }, 0)) / period) : 0;
-                        avgLoss = (losses.slice(i - period + 1, i + 1).reduce(function(a, b) { return a + b; }, 0)) / period;
-                    }
-
-                    if (avgLoss === 0) {
-                        result.push(100);
-                    } else {
-                        var rs = avgGain / avgLoss;
-                        result.push(100 - (100 / (1 + rs)));
-                    }
-                }
+                // Wilder's smoothing: 后续值使用平滑公式 O(1)
+                avgGain = (avgGain * (period - 1) + gain) / period;
+                avgLoss = (avgLoss * (period - 1) + loss) / period;
+                result.push(avgLoss === 0 ? 100 : (100 - (100 / (1 + avgGain / avgLoss))));
             }
         }
         return result;
