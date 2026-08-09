@@ -15,6 +15,13 @@ var App = (function() {
         backtestStock: null     // 回测股票
     };
 
+    // 防抖/节流工具
+    var debounceTimers = {};
+    function debounce(key, fn, delay) {
+        if (debounceTimers[key]) clearTimeout(debounceTimers[key]);
+        debounceTimers[key] = setTimeout(fn, delay);
+    }
+
     var pageTitles = {
         home: '量化炒股Pro',
         quote: '行情',
@@ -93,7 +100,8 @@ var App = (function() {
     function loadHomeData() {
         loadIndices();
         loadWatchlist();
-        loadRankList();
+        // 涨幅榜延迟加载，优先渲染大盘+自选
+        setTimeout(function() { loadRankList(); }, 200);
     }
 
     function loadIndices() {
@@ -241,16 +249,18 @@ var App = (function() {
             document.getElementById('add-stock-results').innerHTML = '';
             return;
         }
-        StockAPI.searchStock(value, function(err, results) {
-            if (err || !results) return;
-            var container = document.getElementById('add-stock-results');
-            container.innerHTML = results.map(function(s) {
-                return '<div class="search-result-item" onclick="App.confirmAddStock(\'' + s.code + '\',\'' + s.name + '\',\'' + s.secid + '\')">' +
-                    '<div><span class="stock-name">' + s.name + '</span> <span class="stock-code">' + s.code + '</span></div>' +
-                    '<span class="btn-small">+ 添加</span>' +
-                '</div>';
-            }).join('');
-        });
+        debounce('liveSearch', function() {
+            StockAPI.searchStock(value, function(err, results) {
+                if (err || !results) return;
+                var container = document.getElementById('add-stock-results');
+                container.innerHTML = results.map(function(s) {
+                    return '<div class="search-result-item" onclick="App.confirmAddStock(\'' + s.code + '\',\'' + s.name + '\',\'' + s.secid + '\')">' +
+                        '<div><span class="stock-name">' + s.name + '</span> <span class="stock-code">' + s.code + '</span></div>' +
+                        '<span class="btn-small">+ 添加</span>' +
+                    '</div>';
+                }).join('');
+            });
+        }, 300);
     }
 
     // ===== 股票详情 =====
@@ -302,7 +312,8 @@ var App = (function() {
 
     function loadKline(stock, klt) {
         showLoading('加载K线数据...');
-        var limit = klt === 101 ? 250 : klt === 102 ? 120 : klt === 103 ? 60 : 120;
+        var isMobile = window.innerWidth < 768;
+        var limit = klt === 101 ? (isMobile ? 120 : 250) : klt === 102 ? (isMobile ? 60 : 120) : klt === 103 ? (isMobile ? 36 : 60) : 120;
         StockAPI.getKline(stock.secid, klt, 1, limit, function(err, data) {
             hideLoading();
             if (err || !data || !data.klines || data.klines.length === 0) {
@@ -794,6 +805,7 @@ var App = (function() {
         showTradeModal: showTradeModal,
         setTradeType: setTradeType,
         setQty: setQty,
+        updateTradePreview: updateTradePreview,
         executeTrade: executeTrade,
         resetPortfolio: resetPortfolio,
         toggleTheme: toggleTheme,
