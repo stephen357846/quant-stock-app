@@ -1,6 +1,7 @@
 /* ===== 全局重置 ===== */
 * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html, body { height: 100%; overflow: hidden; font-family: -apple-system, "Microsoft YaHei", "PingFang SC", sans-serif; }
+html { touch-action: manipulation; }
 
 :root {
     --bg-primary: #0d1117;
