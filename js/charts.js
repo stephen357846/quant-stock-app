@@ -8,21 +8,32 @@ var Charts = (function() {
     var klineChart = null;
     var equityChart = null;
 
-    // 初始化K线图
-    function initKlineChart() {
+    // 初始化K线图（等待ECharts加载完成后执行）
+    function initKlineChart(callback) {
         var container = document.getElementById('kline-chart');
         if (!container) return;
+        if (!window.echarts) {
+            container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:300px;color:#8b949e;">图表组件加载中...</div>';
+            window.__onEchartsReady(function() { initKlineChart(callback); });
+            return;
+        }
+        container.innerHTML = '';
         if (klineChart) klineChart.dispose();
         klineChart = echarts.init(container, 'dark');
         window.addEventListener('resize', function() {
             if (klineChart) klineChart.resize();
         });
+        if (callback) callback();
     }
 
     // 渲染K线图 + 技术指标
     // indicator: 'none' | 'ma' | 'macd' | 'boll' | 'kdj' | 'rsi'
     function renderKline(klines, indicator) {
-        if (!klineChart) initKlineChart();
+        if (!window.echarts) {
+            window.__onEchartsReady(function() { renderKline(klines, indicator); });
+            return;
+        }
+        if (!klineChart) initKlineChart(function() { renderKline(klines, indicator); });
         if (!klineChart) return;
 
         indicator = indicator || 'none';
@@ -33,9 +44,14 @@ var Charts = (function() {
         var volumes = klines.map(function(k) { return k.volume; });
 
         // 基础配置
+        var isMobile = window.innerWidth < 768;
+        var dataCount = klines.length;
+
         var option = {
             backgroundColor: 'transparent',
             animation: false,
+            progressive: dataCount > 100 ? 200 : 0,
+            progressiveThreshold: 100,
             tooltip: {
                 trigger: 'axis',
                 axisPointer: { type: 'cross' },
@@ -60,7 +76,10 @@ var Charts = (function() {
         option.xAxis.push({
             type: 'category', data: dates, scale: true,
             boundaryGap: true, axisLine: { lineStyle: { color: '#30363d' } },
-            axisLabel: { color: '#8b949e', fontSize: 10 },
+            axisLabel: {
+                color: '#8b949e', fontSize: 10,
+                interval: isMobile ? Math.max(1, Math.floor(dataCount / 8)) : Math.max(1, Math.floor(dataCount / 15))
+            },
             splitLine: { show: false }
         });
         option.yAxis.push({
@@ -74,6 +93,8 @@ var Charts = (function() {
         option.series.push({
             name: 'K线', type: 'candlestick', data: ohlc,
             xAxisIndex: 0, yAxisIndex: 0,
+            large: dataCount > 60,
+            largeThreshold: 60,
             itemStyle: {
                 color: '#ef5350',        // 阳线（上涨）红色
                 color0: '#26a69a',       // 阴线（下跌）绿色
@@ -116,7 +137,9 @@ var Charts = (function() {
         option.series.push({
             name: '成交量', type: 'bar', data: volumes.map(function(v, i) {
                 return { value: v, itemStyle: { color: klines[i].close >= klines[i].open ? '#ef5350' : '#26a69a' } };
-            }), xAxisIndex: 1, yAxisIndex: 1
+            }), xAxisIndex: 1, yAxisIndex: 1,
+            large: dataCount > 60,
+            largeThreshold: 60
         });
 
         // 副图指标
@@ -179,6 +202,10 @@ var Charts = (function() {
     function renderEquityCurve(result) {
         var container = document.getElementById('bt-equity-chart');
         if (!container) return;
+        if (!window.echarts) {
+            window.__onEchartsReady(function() { renderEquityCurve(result); });
+            return;
+        }
         if (equityChart) equityChart.dispose();
         equityChart = echarts.init(container, 'dark');
 
